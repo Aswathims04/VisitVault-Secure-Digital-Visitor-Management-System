@@ -1,0 +1,1 @@
+import {User} from './User';import {Visitor} from './Visitor';export class Resident extends User{public unitKey:string;constructor(id:string,name:string,email:string,unitKey:string){super(id,name,email);this.unitKey=unitKey}preRegisterVisitor(name:string,phone:string,purpose:string,validFrom:Date,validTo:Date){return new Visitor(name,phone,purpose,validFrom,validTo)}}

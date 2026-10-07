@@ -1,0 +1,1 @@
+import cron from 'node-cron';import{AuditLedger}from'../domain/AuditLedger';import{pool}from'../db/pool';cron.schedule('*/5 * * * *',async()=>{const x=await new AuditLedger().verifyChain();await pool.query('INSERT INTO integrity_status(id,intact,broken_seq) VALUES(1,$1,$2) ON CONFLICT(id) DO UPDATE SET intact=$1,broken_seq=$2,checked_at=now()',[x.intact,x.brokenSeq])});

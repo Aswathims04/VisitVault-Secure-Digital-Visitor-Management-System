@@ -1,0 +1,1 @@
+process.env.DATABASE_URL='postgres://localhost/visitvault_test';process.env.JWT_SECRET='a'.repeat(40);process.env.PII_KEY=Buffer.alloc(32,7).toString('base64');process.env.JWT_ISSUER='visitvault-api';process.env.JWT_AUDIENCE='visitvault-client';
