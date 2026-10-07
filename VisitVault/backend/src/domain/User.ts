@@ -1,0 +1,1 @@
+export abstract class User{protected id:string;protected name:string;protected email:string;constructor(id:string,name:string,email:string){this.id=id;this.name=name;this.email=email}async login():Promise<boolean>{return true}logout():void{}}

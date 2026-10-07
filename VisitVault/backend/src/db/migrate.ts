@@ -1,0 +1,1 @@
+import fs from 'fs';import path from 'path';import {pool} from './pool';pool.query(fs.readFileSync(path.resolve(__dirname,'../../migrations/001_initial.sql'),'utf8')).then(()=>pool.end()).catch(e=>{console.error(e.message);process.exit(1)});

@@ -1,0 +1,1 @@
+// 2.1 Capture Credential Input; 2.2 Decode Token; 2.3 Validate Token; 2.4 Update Token Status; 2.5 Generate Verdict; 2.6 Append Ledger Entry. Route: /api/gate/verify.

@@ -1,0 +1,1 @@
+// 3.0 Emergency Override: POST /api/gate/override; justification required, alert sent, append-only ledger record.

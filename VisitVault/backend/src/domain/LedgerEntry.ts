@@ -1,0 +1,1 @@
+export class LedgerEntry{public entryId='';public timestamp=new Date();public hash='';public prevHash='';constructor(public tokenId:string|null,public actorId:string,public eventType:string,public isOverride=false,public justification:string|null=null){}}

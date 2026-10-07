@@ -1,0 +1,1 @@
+export class Visitor{constructor(public name:string,public phone:string,public purpose:string,public validFrom:Date,public validTo:Date){}}
