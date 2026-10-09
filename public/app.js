@@ -235,6 +235,7 @@ async function viewResident() {
 function buildResidentForm() {
   const name = el('input', { placeholder: 'e.g. John Doe' });
   const phone = el('input', { placeholder: '10-digit mobile number', inputmode: 'tel' });
+  const email = el('input', { type: 'email', placeholder: 'visitor@example.com', autocomplete: 'email', required: '' });
   const purpose = el('input', { placeholder: 'e.g. Family visit, Delivery, Meeting' });
   const from = el('input', { type: 'datetime-local' });
   const to = el('input', { type: 'datetime-local' });
@@ -250,23 +251,25 @@ function buildResidentForm() {
   const submit = async (e) => {
     e.preventDefault();
     msg.textContent = '';
-    if (!name.value.trim() || !phone.value.trim()) { msg.textContent = '⚠ Name and phone are required'; return; }
+    if (!name.value.trim() || !phone.value.trim() || !email.value.trim()) { msg.textContent = '⚠ Name, phone, and visitor email are required'; return; }
     if (!consent.checked) { msg.textContent = '⚠ Please confirm visitor consent before issuing the pass'; return; }
 
     const btn = e.target.querySelector('button[type="submit"]');
-    btn.disabled = true; btn.textContent = 'Issuing pass…';
+    btn.disabled = true; btn.textContent = 'Issuing pass and sending email…';
     try {
       const r = await api('/visitors', { method: 'POST', body: {
         name: name.value.trim(),
         phone: phone.value.trim(),
+        email: email.value.trim(),
         purpose: purpose.value.trim(),
         valid_from: from.value,
         valid_to: to.value,
         consent: true
       }});
       showPassModal(r);
-      name.value = ''; phone.value = ''; purpose.value = '';
-      toast('Pass issued', 'ok');
+      name.value = ''; phone.value = ''; email.value = ''; purpose.value = '';
+      if (r.emailSent) toast('Pass issued and emailed to the visitor', 'ok');
+      else toast('Pass issued, but visitor email was not sent', 'err');
       const listCard = document.querySelector('main .card:last-of-type');
       const statsCard = document.querySelector('main > div:nth-child(2)');
       if (listCard) refreshResidentList(listCard, statsCard);
@@ -279,7 +282,8 @@ function buildResidentForm() {
 
   return el('form', { onsubmit: submit },
     el('div', { class: 'form-grid' },
-      el('div', {}, el('label', {}, 'Visitor full name'), name),
+      el('div', {},       el('label', {}, 'Visitor full name'), name),
+      el('div', {}, el('label', {}, 'Visitor email (QR pass will be sent here)'), email),
       el('div', {}, el('label', {}, 'Phone number'), phone),
       el('div', {}, el('label', {}, 'Purpose of visit'), purpose),
       el('div', {}, el('label', {}, 'Valid from'), from),
@@ -287,7 +291,7 @@ function buildResidentForm() {
     ),
     el('div', { class: 'consent' },
       consent,
-      el('span', {}, "I have obtained the visitor's informed consent to store their name and phone number under the DPDP Act. This data will be auto-purged after 180 days.")
+      el('span', {}, "I have obtained the visitor's informed consent to store their name, phone number, and email address, and to send their QR pass by email. This data will be auto-purged after 180 days.")
     ),
     el('button', { class: 'primary', type: 'submit' }, 'Issue Visitor Pass'),
     msg
@@ -398,10 +402,23 @@ function showPassModal(r) {
   const old = $('#passModal'); if (old) old.remove();
 
   const content = [];
-  content.push(el('h2', {}, r.isOtpOnly ? 'New OTP issued' : '🎫 Visitor Pass Issued'));
+  content.push(el('h2', {}, r.isOtpOnly ? 'New OTP issued' : (r.emailSent ? '🎫 Visitor Pass Issued and Emailed' : '🎫 Visitor Pass Issued')));
   content.push(el('p', { class: 'card-sub' }, r.isOtpOnly
     ? 'Share this OTP with the visitor. It expires shortly.'
-    : 'Share the QR or OTP with your visitor. They will need it at the gate.'));
+    : (r.emailSent
+      ? `The QR pass was emailed to ${r.visitorEmail || 'the visitor'}. Keep this copy as a backup.`
+      : 'The QR pass could not be emailed. Use this copy as a backup and check the email setup.')));
+
+  if (!r.isOtpOnly && typeof r.emailSent === 'boolean') {
+    content.push(el('div', {
+      style: {
+        marginTop: '12px', padding: '10px 12px', borderRadius: 'var(--radius)',
+        border: '1px solid var(--border)', background: 'var(--surface-warm)', color: 'var(--text)'
+      }
+    }, r.emailSent
+      ? `✅ Email sent to ${r.visitorEmail || 'visitor'}.`
+      : `⚠ Email was not sent: ${r.emailError || 'SMTP is not configured or delivery failed.'}`));
+  }
 
   if (r.qr) {
     content.push(el('div', { style: { display: 'grid', placeItems: 'center', margin: '18px 0' } },

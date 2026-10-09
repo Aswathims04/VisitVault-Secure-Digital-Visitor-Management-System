@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS visitors (
   resident_id   INTEGER REFERENCES users(id),
   name_enc      TEXT NOT NULL,
   phone_enc     TEXT NOT NULL,
+  visitor_email_enc TEXT,
   purpose       TEXT,
   valid_from    TIMESTAMPTZ NOT NULL,
   valid_to      TIMESTAMPTZ NOT NULL,
@@ -28,6 +29,7 @@ CREATE TABLE IF NOT EXISTS visitors (
   consent_given BOOLEAN NOT NULL DEFAULT false,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE visitors ADD COLUMN IF NOT EXISTS visitor_email_enc TEXT;
 CREATE INDEX IF NOT EXISTS idx_visitors_token ON visitors(token_id);
 
 CREATE TABLE IF NOT EXISTS ledger (

@@ -113,6 +113,8 @@ function validateVisitorInput(b) {
   if (!b || typeof b !== 'object') return ['body must be an object'];
   if (!b.name || typeof b.name !== 'string' || b.name.length < 2 || b.name.length > 80) errs.push('name must be 2-80 chars');
   if (!/^[0-9+\-\s]{7,15}$/.test(b.phone || '')) errs.push('phone must be 7-15 digits');
+  if (typeof b.email !== 'string' || b.email.length > 254 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(b.email)) errs.push('valid visitor email required');
   if (b.purpose && (typeof b.purpose !== 'string' || b.purpose.length > 200)) errs.push('purpose too long');
   if (!b.valid_from || isNaN(Date.parse(b.valid_from))) errs.push('valid_from invalid');
   if (!b.valid_to || isNaN(Date.parse(b.valid_to))) errs.push('valid_to invalid');
@@ -183,20 +185,33 @@ async function sendAlert({ severity = 'high', message, tokenId, actorId }) {
 let mailer = null;
 function getMailer() {
   if (mailer) return mailer;
-  if (!process.env.SMTP_HOST) return null;
+  if (!process.env.SMTP_HOST) throw new Error('Email delivery is not configured. Set SMTP_HOST and restart VisitVault.');
+  const port = Number(process.env.SMTP_PORT || 587);
   mailer = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: false,
+    port,
+    secure: port === 465,
+    requireTLS: port !== 465,
     auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined
   });
   return mailer;
 }
-async function sendEmail(to, subject, text) {
+async function sendEmail({ to, subject, text, html, attachments }) {
   const m = getMailer();
-  if (!m) { console.log(`[EMAIL-DEV] to=${to} subject=${subject}\n${text}`); return; }
-  try { await m.sendMail({ from: process.env.SMTP_FROM || 'no-reply@visitvault.local', to, subject, text }); }
-  catch (e) { console.error('email failed:', e.message); }
+  return m.sendMail({
+    from: process.env.SMTP_FROM || 'no-reply@visitvault.local',
+    to,
+    subject,
+    text,
+    html,
+    attachments
+  });
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[ch]);
 }
 
 // ---------- retention purge (Person 1) ----------
@@ -288,7 +303,7 @@ app.post('/api/visitors', auth(['resident']), async (req, res) => {
   const errs = validateVisitorInput(req.body);
   if (errs.length) return res.status(400).json({ error: errs.join('; ') });
 
-  const { name, phone, purpose, valid_from, valid_to } = req.body;
+  const { name, phone, email, purpose, valid_from, valid_to } = req.body;
   const tokenId = crypto.randomBytes(12).toString('hex');
   const otp = genOtp();
   const otpExpires = new Date(Date.now() + OTP_TTL_SEC * 1000);
@@ -307,10 +322,10 @@ app.post('/api/visitors', auth(['resident']), async (req, res) => {
     await client.query('BEGIN');
     const ins = await client.query(
       `INSERT INTO visitors
-        (resident_id, name_enc, phone_enc, purpose, valid_from, valid_to,
+        (resident_id, name_enc, phone_enc, visitor_email_enc, purpose, valid_from, valid_to,
          token_id, otp_hash, otp_expires, status, consent_given)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10) RETURNING id`,
-      [req.user.userId, encField(name), encField(phone), purpose || '',
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',$11) RETURNING id`,
+      [req.user.userId, encField(name), encField(phone), encField(email.trim().toLowerCase()), purpose || '',
        valid_from, valid_to, tokenId, hashOtp(otp, tokenId), otpExpires, true]
     );
     await appendEntry(client, {
@@ -321,12 +336,37 @@ app.post('/api/visitors', auth(['resident']), async (req, res) => {
     await client.query('COMMIT');
 
     const qr = await QRCode.toDataURL(token, { width: 320, margin: 1 });
-    const u = await pool.query('SELECT email FROM users WHERE id=$1', [req.user.userId]);
-    sendEmail(u.rows[0].email, 'VisitVault: Visitor pass issued',
-      `Visitor pass issued.\nName: ${name}\nValid: ${istString(new Date(valid_from))} - ${istString(new Date(valid_to))}\nOTP (valid ${OTP_TTL_SEC}s): ${otp}`
-    ).catch(() => {});
+    const cid = `visitor-pass-${tokenId}@visitvault`;
+    let emailSent = false;
+    let emailError = null;
+    try {
+      await sendEmail({
+        to: email.trim(),
+        subject: 'VisitVault: Your visitor pass',
+        text: `A visitor pass has been issued for ${name}.\nValid: ${istString(new Date(valid_from))} - ${istString(new Date(valid_to))}\nYour QR pass is attached. Backup OTP (valid ${OTP_TTL_SEC} seconds): ${otp}`,
+        html: `<p>A visitor pass has been issued for <strong>${escapeHtml(name)}</strong>.</p>
+          <p>Valid: ${escapeHtml(istString(new Date(valid_from)))} - ${escapeHtml(istString(new Date(valid_to)))}</p>
+          <p>Present the attached QR pass to the guard. Backup OTP (valid ${OTP_TTL_SEC} seconds): <strong>${otp}</strong></p>
+          <p><img src="cid:${cid}" alt="Visitor entry QR pass" width="320" height="320"></p>`,
+        attachments: [{
+          filename: `VisitVault-Pass-${tokenId}.png`,
+          content: Buffer.from(qr.split(',')[1], 'base64'),
+          contentType: 'image/png',
+          cid
+        }]
+      });
+      emailSent = true;
+    } catch (mailError) {
+      emailError = mailError.message;
+      console.error('Visitor pass email failed:', mailError.message);
+    }
 
-    res.json({ id: ins.rows[0].id, tokenId, qr, token, otp, otpExpires, otpTtlSec: OTP_TTL_SEC });
+    res.status(201).json({
+      id: ins.rows[0].id, tokenId, qr, token, otp, otpExpires, otpTtlSec: OTP_TTL_SEC,
+      visitorEmail: email.trim(),
+      emailSent,
+      emailError
+    });
   } catch (e) {
     await client.query('ROLLBACK');
     console.error(e);

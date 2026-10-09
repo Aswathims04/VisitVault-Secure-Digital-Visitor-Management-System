@@ -53,10 +53,16 @@ async function runTests() {
   const from = new Date(Date.now() - 60000).toISOString();
   const to = new Date(Date.now() + 3600000).toISOString();
 
-  const v = await call('/visitors', 'POST',
-    { name: 'Test Visitor', phone: '9999999999', purpose: 'test',
+  const invalidEmail = await call('/visitors', 'POST',
+    { name: 'Test Visitor', phone: '9999999999', email: 'not-an-email', purpose: 'test',
       valid_from: from, valid_to: to, consent: true }, res1.token);
-  check('Resident can create visitor pass', v.status === 200 && !!v.data.token);
+  check('Invalid visitor email is rejected', invalidEmail.status === 400 && /email/i.test(invalidEmail.data.error || ''));
+
+  const v = await call('/visitors', 'POST',
+    { name: 'Test Visitor', phone: '9999999999', email: 'test-visitor@example.invalid', purpose: 'test',
+      valid_from: from, valid_to: to, consent: true }, res1.token);
+  check('Resident can create visitor pass and get email delivery status',
+    v.status === 201 && !!v.data.token && typeof v.data.emailSent === 'boolean');
   const { token } = v.data;
 
   const first = await call('/verify/qr', 'POST', { token }, guard.token);
@@ -67,9 +73,9 @@ async function runTests() {
   const past = new Date(Date.now() - 3600000).toISOString();
   const past2 = new Date(Date.now() - 1800000).toISOString();
   const vExp = await call('/visitors', 'POST',
-    { name: 'Expired Tester', phone: '8888888888', purpose: 't',
+    { name: 'Expired Tester', phone: '8888888888', email: 'expired-visitor@example.invalid', purpose: 't',
       valid_from: past, valid_to: past2, consent: true }, res1.token);
-  if (vExp.status === 200) {
+  if (vExp.status === 201) {
     const r = await call('/verify/qr', 'POST', { token: vExp.data.token }, guard.token);
     check('Expired QR verify FAIL', r.data.ok === false);
   } else {
